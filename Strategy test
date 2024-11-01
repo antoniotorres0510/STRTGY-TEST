@@ -1,0 +1,77 @@
+from flask import Flask, request, jsonify
+import requests
+import json
+
+app = Flask(__name__)
+
+#Key api
+OMDB_API_KEY = '4939902f'  
+OMDB_API_URL = 'http://www.omdbapi.com'
+
+#guardar imdb_id para buscar peliculas
+def save_imdb_ids(imdb_ids):
+    """Guardar imdbIDs en un archivo JSON."""
+    with open('imdb_ids.json', 'w', encoding='utf-8') as json_file:
+        json.dump({"imdbIDs": imdb_ids}, json_file, ensure_ascii=False, indent=4)
+
+#guardar peliculas
+def save_movies(movies):
+    """Guardar las peliculas filtradas en un archivo JSON."""
+    with open('filtered_movies.json', 'w', encoding='utf-8') as json_file:
+        json.dump({"Search": movies}, json_file, ensure_ascii=False, indent=4)
+
+#end poin obtenido con query y error para falta de dato
+@app.route('/strtgy', methods=['GET'])
+def search_movies():
+    query = request.args.get('query')
+    
+ #Si no hay clave de busqueda   
+    if not query:
+        return jsonify({"error": "Proporciona una palabra clave para la busqueda."}), 400
+    
+    try:
+        # Obtener las películas que coinciden con la palabra clave
+        response = requests.get(OMDB_API_URL, params={'s': query, 'apikey': OMDB_API_KEY})
+        data = response.json()
+
+        if data.get('Response') == 'False':
+            return jsonify({"error": data.get('Error')}), 404
+        
+        # Obtener todos los imdbID
+        imdb_ids = [movie['imdbID'] for movie in data.get('Search', [])]
+        
+        # Guardar los imdbIDs en un archivo JSON
+        save_imdb_ids(imdb_ids)
+
+        # Filtrar películas con imdbRating > 7 y generar nuevas solicitudes
+        movies = []
+        for imdb_id in imdb_ids:
+            # URL para obtener detalles de la película
+            movie_detail_response = requests.get(OMDB_API_URL, params={'i': imdb_id, 'apikey': OMDB_API_KEY})
+            movie_detail = movie_detail_response.json()
+
+            if movie_detail.get('Response') == 'True':
+                # Verificar si el imdbRating es mayor a 7
+                if float(movie_detail.get('imdbRating', 0)) > 7:
+                    movies.append({
+                        "Title": movie_detail.get("Title"),
+                        "Year": movie_detail.get("Year"),
+                        "imdbID": movie_detail.get("imdbID"),
+                        "Type": movie_detail.get("Type"),
+                        "Poster": movie_detail.get("Poster"),
+                        "imdbRating": movie_detail.get("imdbRating"),
+                    })
+
+        # Guardar las películas filtradas en un archivo JSON
+        if movies:
+            save_movies(movies)
+        else:
+            return jsonify({"message": "No se encontraron peliculas con un imdbRating mayor a 7."}), 404
+
+        return jsonify({"Movies": movies}), 200
+    
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": "Error al conectarse con la API de OMDb."}), 500
+
+if __name__ == '__main__':
+    app.run(debug=True)
